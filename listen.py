@@ -41,6 +41,9 @@ def load_params():
             int(data["spreading_factor"]),
             int(data["bandwidth_hz"]),
             int(data["coding_rate"]),
+            int(data["sync_word"]),
+            bool(data["enable_crc"]),
+            bool(data["implicit_header"]),
         )
     except FileNotFoundError:
         print(f"[!] {PARAMS_FILE} not found — run sniffer.py first to discover parameters.")
@@ -50,8 +53,11 @@ def load_params():
         sys.exit(1)
 
 
-def param_label(freq_mhz, sf, bw_hz, cr):
-    return f"{freq_mhz:.1f} MHz  SF{sf}  BW{bw_hz // 1000}kHz  CR4/{cr}"
+def param_label(freq_mhz, sf, bw_hz, cr, sync, crc, implicit):
+    return (
+        f"{freq_mhz:.1f} MHz  SF{sf}  BW{bw_hz // 1000}kHz  CR4/{cr}"
+        f"  SYNC=0x{sync:02X}  CRC={'Y' if crc else 'N'}  HDR={'impl' if implicit else 'expl'}"
+    )
 
 
 def terminal_width():
@@ -78,16 +84,19 @@ def redraw(params, lines, count):
 
 
 def main():
-    freq, sf, bw, cr = load_params()
-    params = param_label(freq, sf, bw, cr)
+    freq, sf, bw, cr, sync, crc, implicit = load_params()
+    params = param_label(freq, sf, bw, cr, sync, crc, implicit)
 
     spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
     radio = adafruit_rfm9x.RFM9x(spi, CS_PIN, RESET_PIN, freq)
     radio.tx_power         = 5
-    radio.enable_crc       = True
     radio.spreading_factor = sf
     radio.signal_bandwidth = bw
     radio.coding_rate      = cr
+    radio.node             = 0xFF
+    radio.sync_word        = sync
+    radio.enable_crc       = crc
+    radio.implicit_header  = implicit
 
     lines   = deque(maxlen=DISPLAY_ROWS)
     count   = 0

@@ -19,12 +19,15 @@ CS_PIN   = digitalio.DigitalInOut(board.CE1)
 RESET_PIN = digitalio.DigitalInOut(board.D25)
 IRQ_PIN  = digitalio.DigitalInOut(board.D22)   # unused in polling mode
 
-FREQUENCIES_MHZ = list(range(890, 916))  # 890–915 MHz, 1 MHz step
+FREQUENCIES_MHZ = [890]             # confirmed via SDR
+BANDWIDTHS_HZ   = [500000]          # confirmed via SDR
 
-# LoRa parameter sweep space
+# Remaining unknowns to sweep
 SPREADING_FACTORS = [7, 8, 9, 10, 11, 12]
-BANDWIDTHS_HZ     = [500000]
-CODING_RATES      = [5, 6, 7, 8]  # 4/5 … 4/8 (adafruit_rfm9x uses denominator)
+CODING_RATES      = [5, 6, 7, 8]    # 4/5 … 4/8 (adafruit_rfm9x uses denominator)
+SYNC_WORDS        = [0x12, 0x34]    # 0x12 = private LoRa, 0x34 = LoRaWAN
+CRC_MODES         = [False, True]
+IMPLICIT_HEADER   = [False, True]
 
 SWEEP_LISTEN_SECS = 0.2   # how long to listen on each parameter set before moving on
 RSSI_THRESHOLD    = -120  # dBm — anything above this is considered "signal present"
@@ -32,8 +35,16 @@ LOG_FILE          = datetime.now(timezone.utc).strftime("capture_%Y%m%d_%H%M%S.t
 PARAMS_FILE       = "lora_params.json"
 
 
-def save_params(freq_mhz, sf, bw_hz, cr):
-    data = {"frequency_mhz": freq_mhz, "spreading_factor": sf, "bandwidth_hz": bw_hz, "coding_rate": cr}
+def save_params(freq_mhz, sf, bw_hz, cr, sync, crc, implicit):
+    data = {
+        "frequency_mhz": freq_mhz,
+        "spreading_factor": sf,
+        "bandwidth_hz": bw_hz,
+        "coding_rate": cr,
+        "sync_word": sync,
+        "enable_crc": crc,
+        "implicit_header": implicit,
+    }
     with open(PARAMS_FILE, "w") as f:
         json.dump(data, f, indent=2)
     print(f"[*] Parameters saved to {PARAMS_FILE}")
@@ -46,15 +57,23 @@ def init_radio(spi):
     return radio
 
 
-def configure(radio, freq_mhz, sf, bw_hz, cr):
-    radio.frequency_mhz  = freq_mhz
+def configure(radio, freq_mhz, sf, bw_hz, cr, sync, crc, implicit):
+    radio.frequency_mhz    = freq_mhz
     radio.spreading_factor = sf
     radio.signal_bandwidth = bw_hz
     radio.coding_rate      = cr
+    radio.node             = 0xFF   # promiscuous — accept all addresses
+    radio.sync_word        = sync
+    radio.enable_crc       = crc
+    # implicit header mode: SF6 requires it; others can use either
+    radio.implicit_header  = implicit
 
 
-def param_label(freq_mhz, sf, bw_hz, cr):
-    return f"{freq_mhz:.1f} MHz  SF{sf}  BW{bw_hz // 1000}kHz  CR4/{cr}"
+def param_label(freq_mhz, sf, bw_hz, cr, sync, crc, implicit):
+    return (
+        f"{freq_mhz:.1f} MHz  SF{sf}  BW{bw_hz // 1000}kHz  CR4/{cr}"
+        f"  SYNC=0x{sync:02X}  CRC={'Y' if crc else 'N'}  HDR={'impl' if implicit else 'expl'}"
+    )
 
 
 def log_packet(f, params, packet, rssi, snr):
@@ -78,29 +97,34 @@ def log_packet(f, params, packet, rssi, snr):
 
 def sweep_once(radio):
     """Iterate every parameter combination once; return first set that hears traffic."""
-    total = len(FREQUENCIES_MHZ) * len(SPREADING_FACTORS) * len(BANDWIDTHS_HZ) * len(CODING_RATES)
+    total = (
+        len(FREQUENCIES_MHZ) * len(SPREADING_FACTORS) * len(BANDWIDTHS_HZ)
+        * len(CODING_RATES) * len(SYNC_WORDS) * len(CRC_MODES) * len(IMPLICIT_HEADER)
+    )
     idx = 0
     for freq in FREQUENCIES_MHZ:
         for sf in SPREADING_FACTORS:
             for bw in BANDWIDTHS_HZ:
                 for cr in CODING_RATES:
-                    idx += 1
-                    configure(radio, freq, sf, bw, cr)
-                    label = param_label(freq, sf, bw, cr)
-                    print(f"\r[{idx}/{total}] Trying {label}   ", end="", flush=True)
+                    for sync in SYNC_WORDS:
+                        for crc in CRC_MODES:
+                            for implicit in IMPLICIT_HEADER:
+                                idx += 1
+                                configure(radio, freq, sf, bw, cr, sync, crc, implicit)
+                                label = param_label(freq, sf, bw, cr, sync, crc, implicit)
+                                print(f"\r[{idx}/{total}] {label}   ", end="", flush=True)
 
-                    # Short listen window
-                    packet = radio.receive(timeout=SWEEP_LISTEN_SECS, with_header=False)
-                    if packet is not None:
-                        print(f"\n[+] Signal found on {label}")
-                        return (freq, sf, bw, cr), packet, radio.last_rssi, radio.last_snr
+                                packet = radio.receive(timeout=SWEEP_LISTEN_SECS, with_header=False)
+                                if packet is not None:
+                                    print(f"\n[+] Signal found: {label}")
+                                    return (freq, sf, bw, cr, sync, crc, implicit), packet, radio.last_rssi, radio.last_snr
 
     return None, None, None, None
 
 
-def capture_loop(radio, freq, sf, bw, cr):
-    configure(radio, freq, sf, bw, cr)
-    params = param_label(freq, sf, bw, cr)
+def capture_loop(radio, freq, sf, bw, cr, sync, crc, implicit):
+    configure(radio, freq, sf, bw, cr, sync, crc, implicit)
+    params = param_label(freq, sf, bw, cr, sync, crc, implicit)
     print(f"[*] Locking on {params}")
     print(f"[*] Writing packets to {LOG_FILE}")
 
@@ -138,13 +162,13 @@ def main():
             print("\n[!] Full sweep complete with no signal found.  Repeating…")
             continue
 
-        freq, sf, bw, cr = params
-        save_params(freq, sf, bw, cr)
+        freq, sf, bw, cr, sync, crc, implicit = params
+        save_params(freq, sf, bw, cr, sync, crc, implicit)
         # Log the first packet that triggered detection
         with open(LOG_FILE, "a") as log:
-            log_packet(log, param_label(freq, sf, bw, cr), first_packet, rssi, snr)
+            log_packet(log, param_label(freq, sf, bw, cr, sync, crc, implicit), first_packet, rssi, snr)
 
-        done = capture_loop(radio, freq, sf, bw, cr)
+        done = capture_loop(radio, freq, sf, bw, cr, sync, crc, implicit)
         if done:
             break
 
