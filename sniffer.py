@@ -23,7 +23,7 @@ FREQUENCIES_MHZ = list(range(890, 916))  # 890–915 MHz, 1 MHz step
 
 # LoRa parameter sweep space
 SPREADING_FACTORS = [7, 8, 9, 10, 11, 12]
-BANDWIDTHS_HZ     = [125000, 250000, 500000]
+BANDWIDTHS_HZ     = [500000]
 CODING_RATES      = [5, 6, 7, 8]  # 4/5 … 4/8 (adafruit_rfm9x uses denominator)
 
 SWEEP_LISTEN_SECS = 0.2   # how long to listen on each parameter set before moving on
