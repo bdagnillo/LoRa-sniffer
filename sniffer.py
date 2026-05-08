@@ -19,8 +19,7 @@ CS_PIN   = digitalio.DigitalInOut(board.CE1)
 RESET_PIN = digitalio.DigitalInOut(board.D25)
 IRQ_PIN  = digitalio.DigitalInOut(board.D22)   # unused in polling mode
 
-# 915 MHz ISM band channel plan (902–928 MHz, 200 kHz steps)
-FREQUENCIES_MHZ = [f / 10 for f in range(9020, 9281, 2)]  # 902.0–928.0 MHz, 0.2 MHz step
+FREQUENCIES_MHZ = list(range(890, 916))  # 890–915 MHz, 1 MHz step
 
 # LoRa parameter sweep space
 SPREADING_FACTORS = [7, 8, 9, 10, 11, 12]
