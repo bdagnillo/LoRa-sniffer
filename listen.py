@@ -35,7 +35,11 @@ RESET_STYLE   = "\033[0m"
 def load_params():
     try:
         with open(PARAMS_FILE) as f:
-            data = json.load(f)
+            raw = f.read().strip()
+        if not raw:
+            print(f"[!] {PARAMS_FILE} is empty — sniffer.py hasn't found a signal yet.")
+            sys.exit(1)
+        data = json.loads(raw)
         return (
             float(data["frequency_mhz"]),
             int(data["spreading_factor"]),
@@ -48,8 +52,8 @@ def load_params():
     except FileNotFoundError:
         print(f"[!] {PARAMS_FILE} not found — run sniffer.py first to discover parameters.")
         sys.exit(1)
-    except KeyError as e:
-        print(f"[!] {PARAMS_FILE} is missing field {e}.")
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"[!] {PARAMS_FILE} is invalid: {e}")
         sys.exit(1)
 
 
