@@ -29,7 +29,7 @@ SYNC_WORDS        = [0x12, 0x34]    # 0x12 = private LoRa, 0x34 = LoRaWAN
 CRC_MODES         = [False, True]
 IMPLICIT_HEADER   = [False, True]
 
-SWEEP_LISTEN_SECS = 0.2   # how long to listen on each parameter set before moving on
+SWEEP_LISTEN_SECS = 0.5   # how long to listen on each parameter set before moving on
 RSSI_THRESHOLD    = -120  # dBm — anything above this is considered "signal present"
 LOG_FILE          = datetime.now(timezone.utc).strftime("capture_%Y%m%d_%H%M%S.txt")
 PARAMS_FILE       = "lora_params.json"
